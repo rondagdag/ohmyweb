@@ -3,7 +3,11 @@
 
 ## ← index.html
 
-Where you'll write the content of your website. 
+Load the firmware to your micro:bit
+
+
+
+
 
 
 

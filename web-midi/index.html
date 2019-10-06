@@ -1,174 +1,202 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
-<head>
-	<title>Web MIDI with Web Audio</title>
+  <head>
+    <title>Web MIDI with Web Audio</title>
 
-	<script>
-		
-		var context=null;		// the Web Audio "context" object
-		var midiAccess=null;	// the MIDIAccess object.
-		var oscillator=null;	// the single oscillator
-		var envelope=null;		// the envelope for the single oscillator
-		var attack=0.5;			// attack speed
-		var release=0.5;		// release speed
-		var portamento=0.5;	// portamento/glide speed
-		var activeNotes = [];	// the stack of actively-pressed keys
+    <script>
+      var context = null; // the Web Audio "context" object
+      var midiAccess = null; // the MIDIAccess object.
+      var oscillator = null; // the single oscillator
+      var envelope = null; // the envelope for the single oscillator
+      var attack = 0.5; // attack speed
+      var release = 0.5; // release speed
+      var portamento = 0.5; // portamento/glide speed
+      var activeNotes = []; // the stack of actively-pressed keys
 
-        // Globals to access them later.
-        let midiIn = [];
-        let notesOn = new Map(); 
+      // Globals to access them later.
+      let midiIn = [];
+      let notesOn = new Map();
 
-		window.addEventListener('load', async function() {
-            // patch up prefixes
-            try {
-                window.AudioContext=window.AudioContext||window.webkitAudioContext;
+      window.addEventListener("load", async function() {
+        // patch up prefixes
+        try {
+          window.AudioContext =
+            window.AudioContext || window.webkitAudioContext;
 
-                if (navigator.requestMIDIAccess)
-                {
-                    let midi = await navigator.requestMIDIAccess();
-                    onMIDIInit(midi);
-                }
-                else
-                    alert("No MIDI support present in your browser.  You're gonna have a bad time.")
+          //step 1 Request Access
+          if (navigator.requestMIDIAccess) {
+            let midi = await navigator.requestMIDIAccess();
+            onMIDIInit(midi);
+          } else alert("No MIDI support present in your browser.  You're gonna have a bad time.");
 
-               
+          document
+            .querySelector("button")
+            .addEventListener("click", function() {
+              context = new AudioContext();
+              // set up the basic oscillator chain, muted to begin with.
+              oscillator = context.createOscillator();
+              oscillator.frequency.setValueAtTime(110, 0);
+              envelope = context.createGain();
+              oscillator.connect(envelope);
+              envelope.connect(context.destination);
+              envelope.gain.value = 0.0; // Mute the sound
+              oscillator.start(0); // Go ahead and start up the oscillator
 
-                document.querySelector('button').addEventListener('click', function() {
-                    context = new AudioContext();
-                     // set up the basic oscillator chain, muted to begin with.
-                    oscillator = context.createOscillator();
-                    oscillator.frequency.setValueAtTime(110, 0);
-                    envelope = context.createGain();
-                    oscillator.connect(envelope);
-                    envelope.connect(context.destination);
-                    envelope.gain.value = 0.0;  // Mute the sound
-                    oscillator.start(0);  // Go ahead and start up the oscillator
-                    
-                    context.resume().then(() => {
-                        console.log('Playback resumed successfully');
-                    });
-                });
-            } catch (error) {
-                onMIDIReject(error);
-            }
-		} );
-
-		function connectMIDIInput() {
-			
-		    // Reset.
-            midiIn = [];
-            
-            // MIDI devices that send you data.
-            const inputs = midiAccess.inputs.values();
-            for (let input = inputs.next(); input && !input.done; input = inputs.next()) {
-                midiIn.push(input.value);
-            }
-
-            displayDevices();
-            startListening();
+              context.resume().then(() => {
+                console.log("Playback resumed successfully");
+              });
+            });
+        } catch (error) {
+          onMIDIReject(error);
         }
+      });
+
+      function connectMIDIInput() {
+        // Reset.
+        midiIn = [];
+
+        //step 2 Scan for Relevant Device
+        // MIDI devices that send you data.
+        const inputs = midiAccess.inputs.values();
+        for (
+          let input = inputs.next();
+          input && !input.done;
+          input = inputs.next()
+        ) {
+          midiIn.push(input.value);
+        }
+
+        displayDevices();
+        startListening();
+      }
+
+      function onMIDIInit(midi) {
+        midiAccess = midi;
+
+        connectMIDIInput();
+        midiAccess.onstatechange = connectMIDIInput;
+      }
+
+      function onMIDIReject(err) {
+        alert(
+          "The MIDI system failed to start.  You're gonna have a bad time."
+        );
+      }
+
+      function displayDevices() {
+        selectIn.innerHTML = midiIn
+          .map(device => `<option>${device.name}</option>`)
+          .join("");
+      }
+
+      function startListening() {
+        outputIn.innerHTML = "";
+
+        //step 3 Add Event Listener
+        // Start listening to MIDI messages.
+        for (const input of midiIn) {
+          input.addEventListener("midimessage", MIDIMessageEventHandler);
+        }
+      }
+
+      function MIDIMessageEventHandler(event) {
+        //step 4 Decode the message
         
-		function onMIDIInit(midi) {
-			midiAccess = midi;
+        // MIDI commands we care about. See
+        // http://webaudio.github.io/web-midi-api/#a-simple-monophonic-sine-wave-midi-synthesizer.
+        const NOTE_ON = 9;
+        const NOTE_OFF = 8;
 
-			connectMIDIInput();
-			midiAccess.onstatechange=connectMIDIInput;
-		}
+        const cmd = event.data[0] >> 4;
+        const pitch = event.data[1];
+        const velocity = event.data.length > 2 ? event.data[2] : 1; // if velocity == 0, fall thru: it's a note-off.
 
-		function onMIDIReject(err) {
-			alert("The MIDI system failed to start.  You're gonna have a bad time.");
+        // You can use the timestamp to figure out the duration of each note.
+        const timestamp = Date.now();
+
+        // Note that not all MIDI controllers send a separate NOTE_OFF command for every NOTE_ON.
+        if (cmd === NOTE_OFF || (cmd === NOTE_ON && velocity === 0)) {
+          outputIn.innerHTML += `🎧 from ${event.srcElement.name} note OFF: pitch:<b>${pitch}</b>, velocity: <b>${velocity}</b> <br/>`;
+
+          // Complete the note!
+          const note = notesOn.get(pitch);
+          if (note) {
+            outputIn.innerHTML += `🎵 pitch:<b>${pitch}</b>, duration:<b>${timestamp -
+              note}</b> ms. <br>`;
+            notesOn.delete(pitch);
+            noteOff(pitch);
+          }
+        } else if (cmd === NOTE_ON) {
+          outputIn.innerHTML += `🎧 from ${event.srcElement.name} note ON: pitch:<b>${pitch}</b>, velocity: <b>${velocity}</b> <br/>`;
+
+          // One note can only be on at once.
+          notesOn.set(pitch, timestamp);
+          noteOn(pitch);
         }
-        
-        function displayDevices() {
-            selectIn.innerHTML = midiIn.map(device => `<option>${device.name}</option>`).join('');
+
+        // Scroll to the bottom of this div.
+        outputIn.scrollTop = outputIn.scrollHeight;
+      }
+
+      function frequencyFromNoteNumber(note) {
+        return 440 * Math.pow(2, (note - 69) / 12);
+      }
+
+      function noteOn(noteNumber) {
+        if (!context) return;
+        activeNotes.push(noteNumber);
+        oscillator.frequency.cancelScheduledValues(0);
+        oscillator.frequency.setTargetAtTime(
+          frequencyFromNoteNumber(noteNumber),
+          0,
+          portamento
+        );
+        envelope.gain.cancelScheduledValues(0);
+        envelope.gain.setTargetAtTime(1.0, 0, attack);
+      }
+
+      function noteOff(noteNumber) {
+        if (!context) return;
+        var position = activeNotes.indexOf(noteNumber);
+        if (position != -1) {
+          activeNotes.splice(position, 1);
         }
-
-        function startListening() {
-            outputIn.innerHTML = '';
-            
-            // Start listening to MIDI messages.
-            for (const input of midiIn) {
-                input.addEventListener('midimessage', MIDIMessageEventHandler);
-            }
+        if (activeNotes.length == 0) {
+          // shut off the envelope
+          envelope.gain.cancelScheduledValues(0);
+          envelope.gain.setTargetAtTime(0.0, 0, release);
+        } else {
+          oscillator.frequency.cancelScheduledValues(0);
+          oscillator.frequency.setTargetAtTime(
+            frequencyFromNoteNumber(activeNotes[activeNotes.length - 1]),
+            0,
+            portamento
+          );
         }
-
-		function MIDIMessageEventHandler(event) {
-            // MIDI commands we care about. See
-            // http://webaudio.github.io/web-midi-api/#a-simple-monophonic-sine-wave-midi-synthesizer.
-            const NOTE_ON = 9;
-            const NOTE_OFF = 8;
-
-            const cmd = event.data[0] >> 4;
-            const pitch = event.data[1];
-            const velocity = (event.data.length > 2) ? event.data[2] : 1; // if velocity == 0, fall thru: it's a note-off. 
-            
-            // You can use the timestamp to figure out the duration of each note.
-            const timestamp = Date.now();
-            
-            // Note that not all MIDI controllers send a separate NOTE_OFF command for every NOTE_ON.
-            if (cmd === NOTE_OFF || (cmd === NOTE_ON && velocity === 0)) {
-                outputIn.innerHTML += `🎧 from ${event.srcElement.name} note OFF: pitch:<b>${pitch}</b>, velocity: <b>${velocity}</b> <br/>`;
-            
-                // Complete the note!
-                const note = notesOn.get(pitch);
-                if (note) {
-                    outputIn.innerHTML += `🎵 pitch:<b>${pitch}</b>, duration:<b>${timestamp - note}</b> ms. <br>`;
-                    notesOn.delete(pitch);
-                    noteOff(pitch);
-                }
-            } else if (cmd === NOTE_ON) {
-                outputIn.innerHTML += `🎧 from ${event.srcElement.name} note ON: pitch:<b>${pitch}</b>, velocity: <b>${velocity}</b> <br/>`;
-                
-                // One note can only be on at once.
-                notesOn.set(pitch, timestamp);
-                noteOn(pitch);
-            }
-            
-            // Scroll to the bottom of this div.
-            outputIn.scrollTop = outputIn.scrollHeight;
-		}
-
-		function frequencyFromNoteNumber( note ) {
-			return 440 * Math.pow(2,(note-69)/12);
-		}
-
-		function noteOn(noteNumber) {
-            if (!context) return;
-			activeNotes.push( noteNumber );
-			oscillator.frequency.cancelScheduledValues(0);
-			oscillator.frequency.setTargetAtTime( frequencyFromNoteNumber(noteNumber), 0, portamento );
-			envelope.gain.cancelScheduledValues(0);
-			envelope.gain.setTargetAtTime(1.0, 0, attack);
-		}
-
-		function noteOff(noteNumber) {
-            if (!context) return;
- 			var position = activeNotes.indexOf(noteNumber);
-			if (position!=-1) {
-				activeNotes.splice(position,1);
-			}
-			if (activeNotes.length==0) {	// shut off the envelope
-				envelope.gain.cancelScheduledValues(0);
-				envelope.gain.setTargetAtTime(0.0, 0, release );
-			} else {
-				oscillator.frequency.cancelScheduledValues(0);
-				oscillator.frequency.setTargetAtTime( frequencyFromNoteNumber(activeNotes[activeNotes.length-1]), 0, portamento );
-			}
-		}
-	</script>
-</head>
-<body>
+      }
+    </script>
+  </head>
+  <body>
     <h2>Devices</h2>
-    <p>If you have any MIDI devices connected, they will appear here. You can also simulate them
-    if you don't have any, but this depends on OS/what you have installed, so you need to figure it out.</p>
-    <b>Inputs:</b> <select id="selectIn"></select><br>
+    <p>
+      If you have any MIDI devices connected, they will appear here. You can
+      also simulate them if you don't have any, but this depends on OS/what you
+      have installed, so you need to figure it out.
+    </p>
+    <b>Inputs:</b>
+    <select id="selectIn"></select
+    ><br />
 
     <button id="play">Play</button>
     <h2>Listening to messages from an input device</h2>
-    <p>To test this, start mashing on the buttons/keys of a connected input device.</p>
+    <p>
+      To test this, start mashing on the buttons/keys of a connected input
+      device.
+    </p>
     <p class="output" id="outputIn"></p>
-    
 
-	<h2 id="badtime" style="visibility:hidden">No MIDI input devices present.  You're gonna have a bad time.</h2>
-</body>
+    <h2 id="badtime" style="visibility:hidden">
+      No MIDI input devices present. You're gonna have a bad time.
+    </h2>
+  </body>
 </html>
