@@ -2,14 +2,18 @@
 
 //https://davrami.github.io/angularWebUsb/poten
 
-const WebUSBURL URLS [] = {
+/*const WebUSBURL URLS [] = {
+{1,"oh-my-web.glitch.me/web-usb/"}
 {1, "webusb-ar.glitch.me/"},
 {0, "localhost: 8000"},
 };
 
 const uint8_t ALLOWED_ORIGINS [] = {1, 2};
 
-WebUSB WebUSBSerial (URLS, 2, 1, ALLOWED_ORIGINS, 2);
+WebUSB WebUSBSerial (URLS, 2, 1, ALLOWED_ORIGINS, 2);*/
+
+WebUSB WebUSBSerial(1 /* https:// */, "oh-my-web.glitch.me/web-usb");
+
 
 #define Serial WebUSBSerial
 
