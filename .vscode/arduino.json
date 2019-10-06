@@ -1,0 +1,6 @@
+{
+    "board": "arduino:avr:leonardo",
+    "programmer": "AVR ISP",
+    "sketch": "web-usb/firmware/potentiometer/potentiometer.ino",
+    "port": "/dev/cu.usbmodemWUART1"
+}
